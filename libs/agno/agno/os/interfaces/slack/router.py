@@ -172,6 +172,7 @@ def attach_routes(
             run_kwargs: Dict[str, Any] = {
                 "user_id": ctx["user"],
                 "session_id": session_id,
+                "metadata": {"channel_id": ctx["channel_id"]},
                 "files": files or None,
                 "images": images or None,
                 "videos": videos or None,
@@ -277,6 +278,7 @@ def attach_routes(
                 "stream_events": True,
                 "user_id": ctx["user"],
                 "session_id": session_id,
+                "metadata": {"channel_id": ctx["channel_id"]},
                 "files": files or None,
                 "images": images or None,
                 "videos": videos or None,
