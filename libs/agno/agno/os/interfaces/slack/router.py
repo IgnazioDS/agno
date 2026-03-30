@@ -333,9 +333,9 @@ def attach_routes(
                         await stream.append(markdown_text=content)
                         state.stream_chars_sent += len(content)
                     else:
-                        # Rotate: close current stream, open a new one.
-                        # Capture in-progress cards so they carry over to the new stream.
-                        in_progress = {k: v.title for k, v in state.task_cards.items() if v.status == "in_progress"}
+                        # Rotate: snapshot all cards, close current stream, open a new one.
+                        # Re-emit as a running list so the user sees full history in each message.
+                        card_snapshot = [(k, v.title, v.status) for k, v in state.task_cards.items()]
                         rotate_stop: Dict[str, Any] = {}
                         if state.task_cards:
                             rotate_stop["chunks"] = state.resolve_all_pending("complete")
@@ -349,12 +349,15 @@ def attach_routes(
                             task_display_mode=task_display_mode,
                             buffer_size=buffer_size,
                         )
-                        # Re-emit in-progress cards so long-running tasks continue in the new stream
-                        for key, title in in_progress.items():
+                        for key, title, status in card_snapshot:
                             state.track_task(key, title)
+                            if status == "complete":
+                                state.complete_task(key)
+                            elif status == "error":
+                                state.error_task(key)
                             await stream.append(
                                 markdown_text="",
-                                chunks=[{"type": "task_update", "id": key, "title": title, "status": "in_progress"}],
+                                chunks=[{"type": "task_update", "id": key, "title": title, "status": status}],
                             )
                         continued = "_(continued)_\n" + content
                         await stream.append(markdown_text=continued)
