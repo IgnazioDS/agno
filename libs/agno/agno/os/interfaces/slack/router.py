@@ -16,7 +16,7 @@ from agno.os.interfaces.slack.helpers import (
     upload_response_media_async,
 )
 from agno.os.interfaces.slack.security import verify_slack_signature
-from agno.os.interfaces.slack.state import StreamState
+from agno.os.interfaces.slack.state import _STREAM_CHAR_LIMIT, StreamState
 from agno.team import RemoteTeam, Team
 from agno.tools.slack import SlackTools
 from agno.utils.log import log_error
@@ -324,24 +324,42 @@ def attach_routes(
                         except Exception:
                             pass
 
-                    await stream.append(markdown_text=state.flush())
+                    content = state.flush()
+                    if state.stream_chars_sent + len(content) <= _STREAM_CHAR_LIMIT:
+                        await stream.append(markdown_text=content)
+                        state.stream_chars_sent += len(content)
+                    else:
+                        state.overflow_text += content
 
             # Default to complete when no terminal error/cancel event arrived
             final_status: Literal["in_progress", "complete", "error"] = state.terminal_status or "complete"
             completion_chunks = state.resolve_all_pending(final_status) if state.task_cards else []
             stop_kwargs: Dict[str, Any] = {}
             if state.has_content():
-                stop_kwargs["markdown_text"] = state.flush()
+                final_content = state.flush()
+                if state.stream_chars_sent + len(final_content) <= _STREAM_CHAR_LIMIT:
+                    stop_kwargs["markdown_text"] = final_content
+                    state.stream_chars_sent += len(final_content)
+                else:
+                    state.overflow_text += final_content
             if completion_chunks:
                 stop_kwargs["chunks"] = completion_chunks
             await stream.stop(**stop_kwargs)
 
+            # Content that exceeded the stream budget — send as regular messages
+            if state.overflow_text:
+                await send_slack_message_async(
+                    async_client, channel=ctx["channel_id"], message=state.overflow_text, thread_ts=ctx["thread_id"]
+                )
+
             await upload_response_media_async(async_client, state, ctx["channel_id"], ctx["thread_id"])
 
         except Exception as e:
-            log_error(
-                f"Error streaming slack response: {e} [channel={ctx['channel_id']}, thread={ctx['thread_id']}, user={user_id}]"
-            )
+            is_msg_too_long = "msg_too_long" in str(e)
+            if not is_msg_too_long:
+                log_error(
+                    f"Error streaming slack response: {e} [channel={ctx['channel_id']}, thread={ctx['thread_id']}, user={user_id}]"
+                )
             try:
                 await async_client.assistant_threads_setStatus(
                     channel_id=ctx["channel_id"], thread_ts=ctx["thread_id"], status=""
@@ -353,16 +371,28 @@ def attach_routes(
                 try:
                     stop_kwargs_err: Dict[str, Any] = {}
                     if state.task_cards:
-                        stop_kwargs_err["chunks"] = state.resolve_all_pending("error")
+                        stop_kwargs_err["chunks"] = state.resolve_all_pending(
+                            "complete" if is_msg_too_long else "error"
+                        )
                     await stream.stop(**stop_kwargs_err)
                 except Exception:
                     pass
-            await send_slack_message_async(
-                async_client,
-                channel=ctx["channel_id"],
-                message=_ERROR_MESSAGE,
-                thread_ts=ctx["thread_id"],
-            )
+            if is_msg_too_long:
+                # Stream already has content up to the limit; send remaining as regular messages
+                overflow = state.overflow_text
+                if state.has_content():
+                    overflow += state.flush()
+                if overflow:
+                    await send_slack_message_async(
+                        async_client, channel=ctx["channel_id"], message=overflow, thread_ts=ctx["thread_id"]
+                    )
+            else:
+                await send_slack_message_async(
+                    async_client,
+                    channel=ctx["channel_id"],
+                    message=_ERROR_MESSAGE,
+                    thread_ts=ctx["thread_id"],
+                )
 
     async def _handle_thread_started(event: dict):
         from slack_sdk.web.async_client import AsyncWebClient

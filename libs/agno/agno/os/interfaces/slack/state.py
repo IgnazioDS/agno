@@ -12,6 +12,10 @@ if TYPE_CHECKING:
 # Literal not Enum — values flow directly into Slack API dicts as plain strings
 TaskStatus = Literal["in_progress", "complete", "error"]
 
+# Slack caps message text at ~40K chars. Streaming uses a lower limit than
+# the non-streaming splitter (39900) to absorb task card overhead near the boundary.
+_STREAM_CHAR_LIMIT = 39000
+
 
 class TaskUpdateDict(TypedDict):
     type: str
@@ -55,6 +59,11 @@ class StreamState:
 
     # Set by handlers on terminal events; router reads this for the final flush
     terminal_status: Optional[TaskStatus] = None
+
+    # Total chars sent to the current Slack stream via append()/stop()
+    stream_chars_sent: int = 0
+    # Content that exceeded the stream budget; sent as regular messages after stop()
+    overflow_text: str = ""
 
     def track_task(self, key: str, title: str) -> None:
         self.task_cards[key] = TaskCard(title=title)
