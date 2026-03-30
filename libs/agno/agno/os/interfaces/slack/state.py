@@ -60,10 +60,8 @@ class StreamState:
     # Set by handlers on terminal events; router reads this for the final flush
     terminal_status: Optional[TaskStatus] = None
 
-    # Total chars sent to the current Slack stream via append()/stop()
+    # Total chars sent to the current Slack stream; reset on rotation
     stream_chars_sent: int = 0
-    # Content that exceeded the stream budget; sent as regular messages after stop()
-    overflow_text: str = ""
 
     def track_task(self, key: str, title: str) -> None:
         self.task_cards[key] = TaskCard(title=title)

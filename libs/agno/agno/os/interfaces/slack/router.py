@@ -329,44 +329,34 @@ def attach_routes(
                         await stream.append(markdown_text=content)
                         state.stream_chars_sent += len(content)
                     else:
-                        # First overflow — signal in the stream that content continues
-                        if not state.overflow_text:
-                            await stream.append(
-                                markdown_text="",
-                                chunks=[
-                                    {
-                                        "type": "task_update",
-                                        "id": "overflow_notice",
-                                        "title": "Continued in next message",
-                                        "status": "complete",
-                                    }
-                                ],
-                            )
-                        state.overflow_text += content
+                        # Rotate: close current stream, open a new one
+                        rotate_stop: Dict[str, Any] = {}
+                        if state.task_cards:
+                            rotate_stop["chunks"] = state.resolve_all_pending("complete")
+                        state.task_cards.clear()
+                        await stream.stop(**rotate_stop)
+                        state.stream_chars_sent = 0
+                        stream = await async_client.chat_stream(
+                            channel=ctx["channel_id"],
+                            thread_ts=ctx["thread_id"],
+                            recipient_team_id=team_id,
+                            recipient_user_id=user_id,
+                            task_display_mode=task_display_mode,
+                            buffer_size=buffer_size,
+                        )
+                        continued = "_(continued)_\n" + content
+                        await stream.append(markdown_text=continued)
+                        state.stream_chars_sent = len(continued)
 
             # Default to complete when no terminal error/cancel event arrived
             final_status: Literal["in_progress", "complete", "error"] = state.terminal_status or "complete"
             completion_chunks = state.resolve_all_pending(final_status) if state.task_cards else []
             stop_kwargs: Dict[str, Any] = {}
             if state.has_content():
-                final_content = state.flush()
-                if state.stream_chars_sent + len(final_content) <= _STREAM_CHAR_LIMIT:
-                    stop_kwargs["markdown_text"] = final_content
-                    state.stream_chars_sent += len(final_content)
-                else:
-                    state.overflow_text += final_content
+                stop_kwargs["markdown_text"] = state.flush()
             if completion_chunks:
                 stop_kwargs["chunks"] = completion_chunks
             await stream.stop(**stop_kwargs)
-
-            # Content that exceeded the stream budget — send as regular messages
-            if state.overflow_text:
-                await send_slack_message_async(
-                    async_client,
-                    channel=ctx["channel_id"],
-                    message="_(continued)_\n" + state.overflow_text,
-                    thread_ts=ctx["thread_id"],
-                )
 
             await upload_response_media_async(async_client, state, ctx["channel_id"], ctx["thread_id"])
 
@@ -393,16 +383,7 @@ def attach_routes(
                     await stream.stop(**stop_kwargs_err)
                 except Exception:
                     pass
-            if is_msg_too_long:
-                # Stream already has content up to the limit; send remaining as regular messages
-                overflow = state.overflow_text
-                if state.has_content():
-                    overflow += state.flush()
-                if overflow:
-                    await send_slack_message_async(
-                        async_client, channel=ctx["channel_id"], message=overflow, thread_ts=ctx["thread_id"]
-                    )
-            else:
+            if not is_msg_too_long:
                 await send_slack_message_async(
                     async_client,
                     channel=ctx["channel_id"],
