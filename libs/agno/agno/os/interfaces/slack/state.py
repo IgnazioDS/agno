@@ -12,10 +12,6 @@ if TYPE_CHECKING:
 # Literal not Enum — values flow directly into Slack API dicts as plain strings
 TaskStatus = Literal["in_progress", "complete", "error"]
 
-# Slack caps message text at ~40K chars. Streaming uses a lower limit than
-# the non-streaming splitter (39900) to absorb task card overhead near the boundary.
-_STREAM_CHAR_LIMIT = 39000
-
 
 class TaskUpdateDict(TypedDict):
     type: str

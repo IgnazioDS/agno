@@ -16,7 +16,7 @@ from agno.os.interfaces.slack.helpers import (
     upload_response_media_async,
 )
 from agno.os.interfaces.slack.security import verify_slack_signature
-from agno.os.interfaces.slack.state import _STREAM_CHAR_LIMIT, StreamState
+from agno.os.interfaces.slack.state import StreamState
 from agno.team import RemoteTeam, Team
 from agno.tools.slack import SlackTools
 from agno.utils.log import log_error
@@ -38,6 +38,10 @@ _IGNORED_SUBTYPES = frozenset(
 
 # User-facing error message for failed requests
 _ERROR_MESSAGE = "Sorry, there was an error processing your message."
+
+# Slack caps message text at ~40K chars. Lower than the non-streaming
+# splitter (39900) to absorb task card overhead near the boundary.
+_STREAM_CHAR_LIMIT = 39000
 
 
 class SlackEventResponse(BaseModel):
