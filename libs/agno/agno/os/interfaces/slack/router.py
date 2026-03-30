@@ -298,21 +298,17 @@ def attach_routes(
                     pass
                 return
 
-            stream_kwargs: Dict[str, Any] = {
-                "channel": ctx["channel_id"],
-                "thread_ts": ctx["thread_id"],
-                "recipient_team_id": team_id,
-                "recipient_user_id": user_id,
-                "task_display_mode": task_display_mode,
-                "buffer_size": buffer_size,
-            }
-
             # Deferred so "Thinking..." indicator stays visible during file
             # download and agent startup (opening earlier shows a blank bubble)
-            stream = await async_client.chat_stream(**stream_kwargs)
+            stream = await async_client.chat_stream(
+                channel=ctx["channel_id"],
+                thread_ts=ctx["thread_id"],
+                recipient_team_id=team_id,
+                recipient_user_id=user_id,
+                task_display_mode=task_display_mode,
+                buffer_size=buffer_size,
+            )
 
-            # stream is reassigned on rotation — process_event picks up the
-            # new stream on the next iteration automatically via closure.
             async for chunk in response_stream:
                 state.collect_media(chunk)
 
@@ -343,8 +339,14 @@ def attach_routes(
                             rotate_stop["chunks"] = state.resolve_all_pending("complete")
                         state.task_cards.clear()
                         await stream.stop(**rotate_stop)
-                        state.stream_chars_sent = 0
-                        stream = await async_client.chat_stream(**stream_kwargs)
+                        stream = await async_client.chat_stream(
+                            channel=ctx["channel_id"],
+                            thread_ts=ctx["thread_id"],
+                            recipient_team_id=team_id,
+                            recipient_user_id=user_id,
+                            task_display_mode=task_display_mode,
+                            buffer_size=buffer_size,
+                        )
                         continued = "_(continued)_\n" + content
                         await stream.append(markdown_text=continued)
                         state.stream_chars_sent = len(continued)
