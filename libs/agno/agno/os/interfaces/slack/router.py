@@ -329,6 +329,19 @@ def attach_routes(
                         await stream.append(markdown_text=content)
                         state.stream_chars_sent += len(content)
                     else:
+                        # First overflow — signal in the stream that content continues
+                        if not state.overflow_text:
+                            await stream.append(
+                                markdown_text="",
+                                chunks=[
+                                    {
+                                        "type": "task_update",
+                                        "id": "overflow_notice",
+                                        "title": "Continued in next message",
+                                        "status": "complete",
+                                    }
+                                ],
+                            )
                         state.overflow_text += content
 
             # Default to complete when no terminal error/cancel event arrived
@@ -349,7 +362,10 @@ def attach_routes(
             # Content that exceeded the stream budget — send as regular messages
             if state.overflow_text:
                 await send_slack_message_async(
-                    async_client, channel=ctx["channel_id"], message=state.overflow_text, thread_ts=ctx["thread_id"]
+                    async_client,
+                    channel=ctx["channel_id"],
+                    message="_(continued)_\n" + state.overflow_text,
+                    thread_ts=ctx["thread_id"],
                 )
 
             await upload_response_media_async(async_client, state, ctx["channel_id"], ctx["thread_id"])
